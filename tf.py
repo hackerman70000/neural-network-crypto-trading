@@ -37,7 +37,6 @@ df['ppo26_12'] = ta.momentum.PercentagePriceOscillator(close=df["close"], window
 df['ppo10_50'] = ta.momentum.PercentagePriceOscillator(close=df["close"], window_slow=50, window_fast=10, window_sign= 9).ppo()
 df['ppo13_49'] = ta.momentum.PercentagePriceOscillator(close=df["close"], window_slow=49, window_fast=13, window_sign= 9).ppo()
 df['ppo3_7'] = ta.momentum.PercentagePriceOscillator(close=df["close"], window_slow=7, window_fast=3, window_sign= 9).ppo()
-df['uli_30'] = ta.volatility.UlcerIndex(close=df["open"], window=30).ulcer_index()
 df['uli_50'] = ta.volatility.UlcerIndex(close=df["open"], window=50).ulcer_index()
 df['cmf'] = ta.volume.ChaikinMoneyFlowIndicator(high=df["high"], low=df["low"], close=df["close"], volume = df["volume"], window = 20).chaikin_money_flow() * 100
 df['sto'] = ta.momentum.StochasticOscillator(high=df["high"], low=df["low"], close=df["close"], window = 14, smooth_window = 3).stoch()
