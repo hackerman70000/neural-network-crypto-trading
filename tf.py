@@ -105,7 +105,9 @@ model.compile(
     loss='binary_crossentropy', optimizer="Adam", metrics=['accuracy']
 )
 
-model.fit(x_train_PCA, y_train, batch_size=1, epochs=100)
+model.fit(x_train_PCA, y_train, batch_size=1, epochs=10, validation_split=0.1,
+    validation_data=None,
+    shuffle=True)
 model.summary()
 
 print("Evaluate on test data")
