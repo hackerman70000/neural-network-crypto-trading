@@ -2,18 +2,21 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import ta
-import lightgbm as lgb
+import lightgbm as lgbm
+import matplotlib.pyplot as plt
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.decomposition import PCA
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report
-from sklearn.metrics import accuracy_score
-#from sklearn.metrics import roc_auc_score
-
+from sklearn.metrics import precision_score
+import tensorflow as tf
 # data downloaded from https://www.cryptodatadownload.com/data/binance/
 df = pd.read_csv('data_binance.csv')
 
 df.rename(columns = {'Volume BTC':'volume'}, inplace = True)
 df['date'] = pd.to_datetime(df['date'])
 df = df.sort_values(by="date")
+df.reset_index(drop=True, inplace=True)
 
 # deleting unused data
 df.drop('date', inplace=True, axis=1)
@@ -26,7 +29,6 @@ df.drop('Volume USDT', inplace=True, axis=1)
 df.dropna(inplace=True)
 
 # calculating technical analisis indicators
-
 df['rsi_14'] = ta.momentum.RSIIndicator(close=df["close"], window=14).rsi()
 df['roc_12'] = ta.momentum.ROCIndicator(close=df["close"], window=12).roc()
 df['roc_20'] = ta.momentum.ROCIndicator(close=df["close"], window=20).roc()
@@ -39,7 +41,6 @@ df['ppo26_12'] = ta.momentum.PercentagePriceOscillator(close=df["close"], window
 df['ppo10_50'] = ta.momentum.PercentagePriceOscillator(close=df["close"], window_slow=50, window_fast=10, window_sign= 9).ppo()
 df['ppo13_49'] = ta.momentum.PercentagePriceOscillator(close=df["close"], window_slow=49, window_fast=13, window_sign= 9).ppo()
 df['ppo3_7'] = ta.momentum.PercentagePriceOscillator(close=df["close"], window_slow=7, window_fast=3, window_sign= 9).ppo()
-df['uli_30'] = ta.volatility.UlcerIndex(close=df["open"], window=30).ulcer_index()
 df['uli_50'] = ta.volatility.UlcerIndex(close=df["open"], window=50).ulcer_index()
 df['cmf'] = ta.volume.ChaikinMoneyFlowIndicator(high=df["high"], low=df["low"], close=df["close"], volume = df["volume"], window = 20).chaikin_money_flow() * 100
 df['sto'] = ta.momentum.StochasticOscillator(high=df["high"], low=df["low"], close=df["close"], window = 14, smooth_window = 3).stoch()
@@ -56,11 +57,12 @@ df['exp']  = np.where(  (df['open'] * 1.051 <= df['high'].shift(-1))
                       | (df['open'] * 1.051 <= df['high'].shift(-3))
                       | (df['open'] * 1.051 <= df['high'].shift(-4))
                       | (df['open'] * 1.051 <= df['high'].shift(-5))
+                      | (df['open'] * 1.051 <= df['high'].shift(-6))
                        ,1 ,0)
 
 
-
-df.drop(df.tail(6).index,inplace=True)
+print(df['exp'].value_counts())
+df.drop(df.tail(7).index,inplace=True) #do wywalenia
 df.drop('high', inplace=True, axis=1)
 df.drop('open', inplace=True, axis=1)
 df.drop('volume', inplace=True, axis=1)
@@ -68,40 +70,75 @@ df.drop('close', inplace=True, axis=1)
 df.drop('low', inplace=True, axis=1)
 df.dropna(inplace=True)
 
+df = df.iloc[df.shape[0]- 720: , :]
+df_train = df.iloc[:df.shape[0]- 100,:]
+df_pred =  df.iloc[df.shape[0]- 100:,:]
 
 # splitting into dataset and validation sets
-x = df.iloc[:, :len(df.columns) - 1]
-y = df['exp']
+x = df_train.iloc[:, :len(df_train.columns) - 1]
+y = df_train['exp']
+
+x_test2 = df_pred.iloc[:, :len(df_pred.columns) - 1]
+y_test2 = df_pred['exp']
+x_test2.reset_index(drop=True, inplace=True)
+y_test2.reset_index(drop=True, inplace=True)
+
+# checking if nan occurs
+print(x.isnull().any().any())
+print(y.isnull().any().any())
+
+x_train,x_test,y_train,y_test=train_test_split(x,y,test_size=0.05,shuffle = True )
+
+x_test.reset_index(drop=True, inplace=True)
+y_test.reset_index(drop=True, inplace=True)
 
 
-x_train,x_test,y_train,y_test=train_test_split(x,y,test_size=0.2,shuffle = True, random_state = 0)
+# skalowanie danych
+scaler = MinMaxScaler(feature_range=(0, 1))
+scaler.fit(x_train)
+
+x_train_scaled = scaler.transform(x_train)
+x_test_scaled = scaler.transform(x_test)
+x_test2_scaled = scaler.transform(x_test2)
+
+ds_train=lgbm.Dataset(x_train_scaled, label=y_train)
+ds_test=lgbm.Dataset(x_test_scaled, label=y_test)
 
 
-#lgbm
-model = lgb.LGBMClassifier(boosting_type='gbdt', class_weight=None, colsample_bytree=1.0,
-               importance_type='split', learning_rate=0.1, max_depth=-1,
-               min_child_samples=20, min_child_weight=0.001, min_split_gain=0.0,
-               n_estimators=100, n_jobs=-1, num_leaves=63, objective=None,
-               random_state=None, reg_alpha=0.0, reg_lambda=0.0, silent=True,
-               subsample=1.0, subsample_for_bin=200000, subsample_freq=0)
+params = {
+'boosting_type': 'dart',
+'objective': 'binary',
+'metric': 'binary_logloss',
+'num_class':1,
+'min_data_in_leaf':30,
+'bagging_fraction':1,
+'bagging_freq':10,
+'max_depth':8,
+'num_leaves':63,
+'learning_rate':0.04,
+'num_iterations':100,
+'extra_trees':'+',
+'max_bin':200,
+'seed':2
+}
 
-model.fit(x_train, y_train)
+
+model=lgbm.train(params,ds_train)
+
+y_pred = model.predict(x_test2_scaled)
+
+print(y_test2.value_counts())
+predictions = pd.DataFrame(y_pred,columns=['0-1'])
+predictions['target'] = y_test2
 
 
-#Feature Importance plot
-fig, ax = plt.subplots(figsize=(14,20))
-lgb.plot_importance(model, max_num_features=50, height=0.8, ax=ax)
-plt.title("LightGBM - Feature Importance", fontsize=16)
-plt.show()
+predictions['predictions']  = np.where(predictions['0-1'] > 0.55,1 ,0)
 
 
-y_pred=model.predict(x_test)
+pd.set_option('display.max_rows', None)
+print(predictions)
 
-accuracy=accuracy_score(y_pred, y_test)
-print('LightGBM Model accuracy score: {0:0.4f}'.format(accuracy_score(y_test, y_pred)))
-print('Test set score: {:.4f}'.format(model.score(x_test, y_test)))
-
-y_pred_train = model.predict(x_train)
-print('Training-set accuracy score: {0:0.4f}'. format(accuracy_score(y_train, y_pred_train)))
-
-print(classification_report(y_test, y_pred))
+m = tf.keras.metrics.Precision()
+m.update_state(predictions['target'], predictions['predictions'])
+print(m.result().numpy())
+print(predictions['predictions'].sum())
