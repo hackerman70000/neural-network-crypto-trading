@@ -1,11 +1,14 @@
+import ta
 import pandas as pd
 import numpy as np
 import tensorflow as tf
+import matplotlib.pyplot as plt
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import train_test_split
 from sklearn.decomposition import PCA
-import ta
-import matplotlib.pyplot as plt
+from keras.callbacks import EarlyStopping
+from sklearn.metrics import precision_score
+
 
 # data downloaded from https://www.cryptodatadownload.com/data/binance/
 df = pd.read_csv('data_binance.csv')
@@ -13,6 +16,7 @@ df = pd.read_csv('data_binance.csv')
 df.rename(columns = {'Volume BTC':'volume'}, inplace = True)
 df['date'] = pd.to_datetime(df['date'])
 df = df.sort_values(by="date")
+df.reset_index(drop=True, inplace=True)
 
 # deleting unused data
 df.drop('date', inplace=True, axis=1)
@@ -53,11 +57,12 @@ df['exp']  = np.where(  (df['open'] * 1.051 <= df['high'].shift(-1))
                       | (df['open'] * 1.051 <= df['high'].shift(-3))
                       | (df['open'] * 1.051 <= df['high'].shift(-4))
                       | (df['open'] * 1.051 <= df['high'].shift(-5))
+                      | (df['open'] * 1.051 <= df['high'].shift(-6))
                        ,1 ,0)
 
 
 
-df.drop(df.tail(6).index,inplace=True)
+df.drop(df.tail(6).index,inplace=True) #do wywalenia
 df.drop('high', inplace=True, axis=1)
 df.drop('open', inplace=True, axis=1)
 df.drop('volume', inplace=True, axis=1)
@@ -65,16 +70,25 @@ df.drop('close', inplace=True, axis=1)
 df.drop('low', inplace=True, axis=1)
 df.dropna(inplace=True)
 
+df = df.iloc[df.shape[0]- 720: , :]   #do testu
 
+df_train = df.iloc[:df.shape[0]- 5,:]
+df_pred =  df.iloc[df.shape[0]- 5:,:]
+
+df_train.reset_index(drop=True, inplace=True)
+df_pred.reset_index(drop=True, inplace=True)
 # splitting into dataset and validation sets
-x = df.iloc[:, :len(df.columns) - 1]
-y = df['exp']
+x = df_train.iloc[:, :len(df_train.columns) - 1]
+y = df_train['exp']
+
+x_test2 = df_pred.iloc[:, :len(df_pred.columns) - 1]
+y_test2 = df_pred['exp']
 
 # checking if nan occurs
 print(x.isnull().any().any())
 print(y.isnull().any().any())
 
-x_train,x_test,y_train,y_test=train_test_split(x,y,test_size=0.2,shuffle = True ) #,random_state = 0
+x_train,x_test,y_train,y_test=train_test_split(x,y,test_size=0.15,shuffle = True )
 
 
 # skalowanie danych
@@ -83,33 +97,54 @@ scaler.fit(x_train)
 
 x_train_scaled = scaler.transform(x_train)
 x_test_scaled = scaler.transform(x_test)
-
+x_test2_scaled = scaler.transform(x_test2)
 
 # pca
-pca = PCA(n_components=16)
+pca = PCA(n_components=18)
 pca.fit(x_train_scaled)
 
 x_train_PCA = pca.transform(x_train_scaled)
 x_test_PCA = pca.transform(x_test_scaled)
-
+x_test2_PCA = pca.transform(x_test2_scaled)
 
 model = tf.keras.Sequential(
     [
+        #tf.keras.layers.Dropout(0.1),
         tf.keras.layers.Dense(128, activation="relu"),
+        tf.keras.layers.Dense(32, activation="relu"),
+        tf.keras.layers.Dense(16, activation="relu"),
         tf.keras.layers.Dense(1, activation="sigmoid"),
     ]
 )
 
+es = EarlyStopping(monitor='val_loss', patience=10,  mode='min', verbose=1)
+
 model.compile(
-    loss='binary_crossentropy', optimizer="Adam", metrics=['accuracy']
+    loss='binary_crossentropy', optimizer="Adam", metrics=[tf.keras.metrics.Precision()]
 )
 
-model.fit(x_train_PCA, y_train, batch_size=1, epochs=10, validation_split=0.1,
-    validation_data=None,
-    shuffle=True)
+history = model.fit(x_train_PCA, y_train, batch_size=1, epochs=13, validation_split=0.1, shuffle=True) #,callbacks=[es]
 model.summary()
 
+
 print("Evaluate on test data")
-results = model.evaluate(x_test_PCA, y_test, batch_size=1)
-print("test loss, test acc:", results)
+evaluation = model.evaluate(x_test_PCA , y_test, batch_size=1)
+print("test loss, test acc:", evaluation)
+
+
+plt.plot(history.history['precision'])
+plt.plot(history.history['val_precision'])
+plt.title('model accuracy')
+plt.ylabel('precision')
+plt.xlabel('epoch')
+plt.legend(['train', 'val'], loc='upper left')
+plt.show()
+
+plt.plot(history.history['loss'])
+plt.plot(history.history['val_loss'])
+plt.title('model loss')
+plt.ylabel('loss')
+plt.xlabel('epoch')
+plt.legend(['train', 'val'], loc='upper left')
+plt.show()
 
