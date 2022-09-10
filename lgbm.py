@@ -1,31 +1,23 @@
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
 import ta
 import lightgbm as lgbm
-import matplotlib.pyplot as plt
 from sklearn.preprocessing import MinMaxScaler
-from sklearn.decomposition import PCA
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import classification_report
-from sklearn.metrics import precision_score
 import tensorflow as tf
-# data downloaded from https://www.cryptodatadownload.com/data/binance/
-df = pd.read_csv('data_binance.csv')
 
+# data downloaded from https://www.cryptodatadownload.com/data/binance/
+
+# data setup
+df = pd.read_csv('data_binance.csv')
 df.rename(columns = {'Volume BTC':'volume'}, inplace = True)
 df['date'] = pd.to_datetime(df['date'])
 df = df.sort_values(by="date")
 df.reset_index(drop=True, inplace=True)
 
-# deleting unused data
+# deleting unwanted data
 df.drop('date', inplace=True, axis=1)
-df.drop('tradecount', inplace=True, axis=1)
-df.drop('unix', inplace=True, axis=1)
-df.drop('symbol', inplace=True, axis=1)
-df.drop('Volume USDT', inplace=True, axis=1)
-
-
+df.drop(['tradecount','unix','symbol','Volume USDT'], inplace=True, axis=1)
 df.dropna(inplace=True)
 
 # calculating technical analisis indicators
@@ -47,11 +39,9 @@ df['sto'] = ta.momentum.StochasticOscillator(high=df["high"], low=df["low"], clo
 df['uo'] = ta.momentum.UltimateOscillator(high=df["high"], low=df["low"], close=df["close"], window1 = 7, window2 = 14, window3 = 28, weight1 = 4.0, weight2 = 2.0, weight3 = 1.0).ultimate_oscillator()
 df['cci'] = ta.trend.CCIIndicator(high=df["high"], low=df["low"], close=df["close"], window = 20, constant = 0.015).cci()
 df['atr'] = ta.volatility.AverageTrueRange(high=df["high"], low=df["low"], close=df["close"], window = 14).average_true_range()
-
 df.dropna(inplace=True)
 
 # creating target values
-
 df['exp']  = np.where(  (df['open'] * 1.051 <= df['high'].shift(-1))
                       | (df['open'] * 1.051 <= df['high'].shift(-2))
                       | (df['open'] * 1.051 <= df['high'].shift(-3))
@@ -60,34 +50,35 @@ df['exp']  = np.where(  (df['open'] * 1.051 <= df['high'].shift(-1))
                       | (df['open'] * 1.051 <= df['high'].shift(-6))
                        ,1 ,0)
 
-
-print(df['exp'].value_counts())
-df.drop(df.tail(7).index,inplace=True) #do wywalenia
-df.drop('high', inplace=True, axis=1)
-df.drop('open', inplace=True, axis=1)
-df.drop('volume', inplace=True, axis=1)
-df.drop('close', inplace=True, axis=1)
-df.drop('low', inplace=True, axis=1)
+# deleting unwanted data
+df.drop(df.tail(6).index,inplace=True) #- comment if making predicitons
+df.drop(['high','open','volume','close','low'], inplace=True, axis=1)
 df.dropna(inplace=True)
 
+# df based on last 2 years
 df = df.iloc[df.shape[0]- 720: , :]
-df_train = df.iloc[:df.shape[0]- 100,:]
-df_pred =  df.iloc[df.shape[0]- 100:,:]
+
+# creating prediction dataset
+df = df.iloc[:df.shape[0]- 10,:]  # declare how many last days you wanna predict
+df_pred =  df.iloc[df.shape[0]- 10:,:]
+
+# resetting index to troubleshoot
+df.reset_index(drop=True, inplace=True)
+df_pred.reset_index(drop=True, inplace=True)
 
 # splitting into dataset and validation sets
-x = df_train.iloc[:, :len(df_train.columns) - 1]
-y = df_train['exp']
+x = df.iloc[:, :len(df.columns) - 1]
+y = df['exp']
 
-x_test2 = df_pred.iloc[:, :len(df_pred.columns) - 1]
-y_test2 = df_pred['exp']
-x_test2.reset_index(drop=True, inplace=True)
-y_test2.reset_index(drop=True, inplace=True)
+x_pred = df_pred.iloc[:, :len(df_pred.columns) - 1]
+y_pred = df_pred['exp']
 
 # checking if nan occurs
 print(x.isnull().any().any())
 print(y.isnull().any().any())
 
-x_train,x_test,y_train,y_test=train_test_split(x,y,test_size=0.05,shuffle = True )
+# train-test split
+x_train,x_test,y_train,y_test=train_test_split(x,y,test_size=0.1,shuffle = True)
 
 x_test.reset_index(drop=True, inplace=True)
 y_test.reset_index(drop=True, inplace=True)
@@ -99,7 +90,7 @@ scaler.fit(x_train)
 
 x_train_scaled = scaler.transform(x_train)
 x_test_scaled = scaler.transform(x_test)
-x_test2_scaled = scaler.transform(x_test2)
+x_pred_scaled = scaler.transform(x_pred)
 
 ds_train=lgbm.Dataset(x_train_scaled, label=y_train)
 ds_test=lgbm.Dataset(x_test_scaled, label=y_test)
@@ -125,20 +116,21 @@ params = {
 
 model=lgbm.train(params,ds_train)
 
-y_pred = model.predict(x_test2_scaled)
-
-print(y_test2.value_counts())
-predictions = pd.DataFrame(y_pred,columns=['0-1'])
-predictions['target'] = y_test2
-
-
-predictions['predictions']  = np.where(predictions['0-1'] > 0.55,1 ,0)
-
+# prediction
+predictions = pd.DataFrame(model.predict(x_pred_scaled),columns=['0-1'])
+predictions['target'] = y_pred
+predictions['predictions']  = np.where(predictions['0-1'] > 0.92,1 ,0)
 
 pd.set_option('display.max_rows', None)
 print(predictions)
 
+# prediction precision (tp/(fp+tp)
 m = tf.keras.metrics.Precision()
 m.update_state(predictions['target'], predictions['predictions'])
+print("")
+print("precision :", end = ' ')
 print(m.result().numpy())
+
+print("")
+print("sum of 1 :", end = ' ')
 print(predictions['predictions'].sum())
