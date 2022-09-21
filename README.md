@@ -1,4 +1,3 @@
-tf - aktualna wersja tf,
-lgbm - wersja z lgbm,
+tf - aktualna wersja tf
 
 data downloaded from https://www.cryptodatadownload.com/data/binance/
